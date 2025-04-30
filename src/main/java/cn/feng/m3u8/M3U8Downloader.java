@@ -26,7 +26,7 @@ import static cn.feng.m3u8.Util.*;
  * @author ChengFeng
  * @since 2024/3/23
  **/
-public class VideoDownloader {
+public class M3U8Downloader {
     private OkHttpClient client;
     private final OkHttpClient.Builder builder = new OkHttpClient.Builder().retryOnConnectionFailure(true);
 
@@ -40,12 +40,12 @@ public class VideoDownloader {
         }
     }
 
-    public VideoDownloader() {
+    public M3U8Downloader() {
         checkMultiThreads();
         client = builder.build();
     }
 
-    public VideoDownloader(Proxy proxy) {
+    public M3U8Downloader(Proxy proxy) {
         checkMultiThreads();
         client = builder.proxy(proxy).build();
     }
