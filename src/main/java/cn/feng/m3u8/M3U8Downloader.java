@@ -143,7 +143,7 @@ public class M3U8Downloader {
                                         tsLatch.countDown();
                                         logger.debug("Downloaded {}", url);
                                         if (onProgress != null) {
-                                            onProgress.accept((int) tsLatch.getCount());
+                                            onProgress.accept((int) (video.getTsList().size() - tsLatch.getCount()));
                                         }
                                     }
                                 });
