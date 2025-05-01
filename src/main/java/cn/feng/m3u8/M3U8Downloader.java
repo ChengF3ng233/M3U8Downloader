@@ -13,6 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntConsumer;
 
@@ -27,7 +29,7 @@ import static cn.feng.m3u8.Util.*;
  **/
 public class M3U8Downloader {
     private OkHttpClient client;
-    private final OkHttpClient.Builder builder = new OkHttpClient.Builder().retryOnConnectionFailure(true);
+    private final OkHttpClient.Builder builder = new OkHttpClient.Builder().connectTimeout(5000, TimeUnit.SECONDS).retryOnConnectionFailure(true);
 
     private final Set<M3U8Video> currentTaskList = new HashSet<>();
     private AtomicInteger currentProgress = new AtomicInteger();
@@ -35,7 +37,7 @@ public class M3U8Downloader {
     private File outputDir = new File("download");
     private boolean split;
     private boolean m3u8;
-    private boolean mp4;
+    private boolean mp4 = true; // Download mp4 in default.
     private IntConsumer onBegin;
     private IntConsumer onProgress;
     private Runnable onComplete;
@@ -103,6 +105,90 @@ public class M3U8Downloader {
         }
     }
 
+    public Future<?> download(M3U8Video video) {
+        // Remove duplicated task
+        if (currentTaskList.contains(video)) return null; else currentTaskList.add(video);
+
+        // Resolve video
+        resolve(video);
+
+        AtomicInteger counter = new AtomicInteger();
+        currentTaskList.forEach(task -> counter.addAndGet(task.getTsList().size()));
+
+        if (onBegin != null) {
+            onBegin.accept(counter.get());
+        }
+
+        return MultiThreads.videoExecutor.submit(() -> {
+            try {
+                // Output
+                File mp4Dir = new File(outputDir, "mp4s");
+                File m3u8Dir = new File(outputDir, "m3u8s");
+                File mp4File = new File(split ? mp4Dir : outputDir, sanitizeFileName(video.getTitle()) + ".mp4");
+                File m3u8File = new File(split ? m3u8Dir : outputDir, sanitizeFileName(video.getTitle()) + ".m3u8");
+
+                if (split) {
+                    mkdirs(mp4Dir, m3u8Dir);
+                }
+                mkdirs(outputDir);
+
+                logger.debug("Downloading {}", video.getTitle());
+
+                // Download mp4
+                if (mp4) {
+                    // Download ts
+                    List<String> tsList = video.getTsList();
+                    Map<Integer, byte[]> tsParts = new ConcurrentHashMap<>();
+
+                    CountDownLatch tsLatch = new CountDownLatch(tsList.size());
+                    for (String url : tsList) {
+                        MultiThreads.tsExecutor.execute(() -> {
+                            try {
+                                tsParts.put(tsList.indexOf(url), decryptTS(httpBytes(url), video.getTsKey(), video.getTsIv()));
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            } finally {
+                                tsLatch.countDown();
+                                logger.debug("Downloaded ts: {}", url);
+                                if (onProgress != null) {
+                                    onProgress.accept(currentProgress.incrementAndGet());
+                                }
+                            }
+                        });
+                    }
+                    tsLatch.await();
+
+                    // Merge ts into mp4
+                    FileOutputStream fileOutputStream = new FileOutputStream(mp4File);
+                    Integer[] indexes = tsParts.keySet().toArray(Integer[]::new);
+                    Arrays.sort(indexes);
+
+                    for (int index : indexes) {
+                        fileOutputStream.write(tsParts.get(index));
+                    }
+
+                    fileOutputStream.flush();
+                    fileOutputStream.close();
+                }
+
+                // Download m3u8
+                if (m3u8) {
+                    FileUtils.writeStringToFile(m3u8File, httpString(video.getVideoURL()), StandardCharsets.UTF_8);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            } finally {
+                if (onComplete != null) onComplete.run();
+                currentTaskList.remove(video);
+                // Reset progress
+                if (currentTaskList.isEmpty()) {
+                    currentProgress = new AtomicInteger();
+                }
+                System.gc();
+            }
+        });
+    }
+
     /**
      * Download a list of videos.
      */
@@ -120,88 +206,7 @@ public class M3U8Downloader {
             }
             mkdirs(outputDir);
 
-            CountDownLatch latch = new CountDownLatch(videoList.size());
-
-            AtomicInteger tsPartsCount = new AtomicInteger();
-            videoList.forEach(video -> tsPartsCount.addAndGet(video.getTsList().size()));
-
-            AtomicInteger totalTsCount = new AtomicInteger(tsPartsCount.get());
-            currentTaskList.forEach(video -> totalTsCount.addAndGet(video.getTsList().size()));
-            currentTaskList.addAll(videoList);
-
-            onBegin.accept(totalTsCount.get());
-
-            for (M3U8Video video : videoList) {
-                if (currentTaskList.contains(video)) continue;
-
-                MultiThreads.videoExecutor.execute(() -> {
-                    try {
-                        File mp4File = new File(split ? mp4Dir : outputDir, sanitizeFileName(video.getTitle()) + ".mp4");
-                        File m3u8File = new File(split ? m3u8Dir : outputDir, sanitizeFileName(video.getTitle()) + ".m3u8");
-                        logger.debug("Downloading {}", video.getTitle());
-                        if (mp4) {
-                            // Download ts
-                            List<String> tsList = video.getTsList();
-                            Map<Integer, byte[]> tsParts = new ConcurrentHashMap<>();
-
-                            CountDownLatch tsLatch = new CountDownLatch(tsList.size());
-                            for (String url : tsList) {
-                                MultiThreads.tsExecutor.execute(() -> {
-                                    try {
-                                        tsParts.put(tsList.indexOf(url), decryptTS(httpBytes(url), video.getTsKey(), video.getTsIv()));
-                                    } catch (Exception e) {
-                                        throw new RuntimeException(e);
-                                    } finally {
-                                        tsLatch.countDown();
-                                        logger.debug("Downloaded {}", url);
-                                        if (onProgress != null) {
-                                            onProgress.accept(currentProgress.incrementAndGet());
-                                        }
-                                    }
-                                });
-                            }
-                            tsLatch.await();
-
-                            // Merge ts into mp4
-                            FileOutputStream fileOutputStream = new FileOutputStream(mp4File);
-                            Integer[] keySet = tsParts.keySet().toArray(Integer[]::new);
-                            Arrays.sort(keySet);
-
-                            for (int o : keySet) {
-                                fileOutputStream.write(tsParts.get(o));
-                            }
-
-                            fileOutputStream.flush();
-                            fileOutputStream.close();
-                        }
-
-                        if (m3u8) {
-                            // Download m3u8
-                            FileUtils.writeStringToFile(m3u8File, httpString(video.getVideoURL()), StandardCharsets.UTF_8);
-                        }
-
-                        latch.countDown();
-                        System.gc();
-                        currentTaskList.remove(video);
-                        // Reset progress
-                        if (currentTaskList.isEmpty()) {
-                            currentProgress = new AtomicInteger();
-                        }
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
-            }
-
-
-            try {
-                latch.await();
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-
-            if (onComplete != null) onComplete.run();
+            videoList.forEach(this::download);
         });
     }
 

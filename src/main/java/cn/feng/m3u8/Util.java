@@ -10,7 +10,7 @@ import java.io.File;
 import java.security.spec.AlgorithmParameterSpec;
 
 class Util {
-    public static final Logger logger = LogManager.getLogger();
+    public static final Logger logger = LogManager.getLogger("Download Thread");
     private static final String ILLEGAL_CHARACTERS = "[<>:\"/\\|?*]";
 
     public static String sanitizeFileName(String fileName) {
