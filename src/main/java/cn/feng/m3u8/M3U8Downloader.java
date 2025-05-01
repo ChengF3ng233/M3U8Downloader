@@ -58,15 +58,26 @@ public class M3U8Downloader {
         client = builder.proxy(proxy).build();
     }
 
+    /**
+     * Remove current proxy.
+     */
     public void clearProxy() {
         client = builder.proxy(Proxy.NO_PROXY).build();
     }
 
+    /**
+     * Setup a proxy for the downloader.
+     */
     public void proxy(Proxy proxy) {
         client = builder.proxy(proxy).build();
     }
 
-    private void resolve(M3U8Video video) {
+    /**
+     * Resolve single video.
+     */
+    public void resolve(M3U8Video video) {
+        if (video.getTsList() != null && !video.getTsList().isEmpty()) return;
+
         logger.debug("Resolving video: {}", video.getTitle());
 
         String m3u8Str = httpString(video.getVideoURL());
@@ -86,9 +97,9 @@ public class M3U8Downloader {
     }
 
     /**
-     * Resolve a list of m3u8 file
+     * Resolve a list of video.
      */
-    private void resolve(List<M3U8Video> videoList) {
+    public void resolve(List<M3U8Video> videoList) {
         CountDownLatch latch = new CountDownLatch(videoList.size());
 
         for (M3U8Video video : videoList) {
@@ -105,6 +116,10 @@ public class M3U8Downloader {
         }
     }
 
+    /**
+     * Download single video.
+     * @return The download process.
+     */
     public Future<?> download(M3U8Video video) {
         // Remove duplicated task
         if (currentTaskList.contains(video)) return null; else currentTaskList.add(video);
