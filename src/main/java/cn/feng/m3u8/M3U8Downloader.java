@@ -10,10 +10,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.Proxy;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -22,7 +19,9 @@ import java.util.function.IntConsumer;
 import static cn.feng.m3u8.Util.*;
 
 /**
- * As the name shows.
+ * A downloader for m3u8 videos.<br>
+ * Call {@link MultiThreads#launch(int, int)} before this is initialized.<br>
+ * To show debug messages, set LEVEL in log4j.properties(or log4j2.xml) to DEBUG
  * @author ChengFeng
  * @since 2024/3/23
  **/
@@ -30,13 +29,19 @@ public class M3U8Downloader {
     private OkHttpClient client;
     private final OkHttpClient.Builder builder = new OkHttpClient.Builder().retryOnConnectionFailure(true);
 
+    private final Set<M3U8Video> currentTaskList = new HashSet<>();
+
+    private File outputDir = new File("download");
+    private boolean split;
+    private boolean m3u8;
+    private boolean mp4;
     private IntConsumer onBegin;
     private IntConsumer onProgress;
     private Runnable onComplete;
 
     private void checkMultiThreads() {
         if (MultiThreads.videoExecutor == null || MultiThreads.tsExecutor == null) {
-            throw new IllegalStateException("MultiThreads must be initialized before VideoDownloader.");
+            throw new IllegalStateException("MultiThreads must be initialized before this.");
         }
     }
 
@@ -100,7 +105,7 @@ public class M3U8Downloader {
     /**
      * Download a list of videos.
      */
-    public void download(List<M3U8Video> videoList, File outputDir, boolean split, boolean mp4, boolean m3u8) {
+    public void download(List<M3U8Video> videoList) {
         MultiThreads.videoExecutor.execute(() -> {
             // Resolve video
             resolve(videoList);
@@ -119,9 +124,15 @@ public class M3U8Downloader {
             AtomicInteger tsPartsCount = new AtomicInteger();
             videoList.forEach(video -> tsPartsCount.addAndGet(video.getTsList().size()));
 
-            onBegin.accept(tsPartsCount.get());
+            AtomicInteger totalTsCount = new AtomicInteger(tsPartsCount.get());
+            currentTaskList.forEach(video -> totalTsCount.addAndGet(video.getTsList().size()));
+            currentTaskList.addAll(videoList);
+
+            onBegin.accept(totalTsCount.get());
 
             for (M3U8Video video : videoList) {
+                if (currentTaskList.contains(video)) continue;
+
                 MultiThreads.videoExecutor.execute(() -> {
                     try {
                         File mp4File = new File(split ? mp4Dir : outputDir, sanitizeFileName(video.getTitle()) + ".mp4");
@@ -170,6 +181,7 @@ public class M3U8Downloader {
 
                         latch.countDown();
                         System.gc();
+                        currentTaskList.remove(video);
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     }
@@ -228,5 +240,33 @@ public class M3U8Downloader {
      */
     public void setOnComplete(Runnable onComplete) {
         this.onComplete = onComplete;
+    }
+
+    /**
+     * Specify output directory.
+     */
+    public void setOutputDir(File outputDir) {
+        this.outputDir = outputDir;
+    }
+
+    /**
+     * Whether to download m3u8 files and mp4 files into different child directories.
+     */
+    public void setSplit(boolean split) {
+        this.split = split;
+    }
+
+    /**
+     * Whether to download m3u8 files.
+     */
+    public void setM3u8(boolean m3u8) {
+        this.m3u8 = m3u8;
+    }
+
+    /**
+     * Whether to download mp4 files.
+     */
+    public void setMp4(boolean mp4) {
+        this.mp4 = mp4;
     }
 }
