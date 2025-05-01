@@ -30,6 +30,7 @@ public class M3U8Downloader {
     private final OkHttpClient.Builder builder = new OkHttpClient.Builder().retryOnConnectionFailure(true);
 
     private final Set<M3U8Video> currentTaskList = new HashSet<>();
+    private AtomicInteger currentProgress = new AtomicInteger();
 
     private File outputDir = new File("download");
     private boolean split;
@@ -154,7 +155,7 @@ public class M3U8Downloader {
                                         tsLatch.countDown();
                                         logger.debug("Downloaded {}", url);
                                         if (onProgress != null) {
-                                            onProgress.accept((int) (video.getTsList().size() - tsLatch.getCount()));
+                                            onProgress.accept(currentProgress.incrementAndGet());
                                         }
                                     }
                                 });
@@ -182,6 +183,10 @@ public class M3U8Downloader {
                         latch.countDown();
                         System.gc();
                         currentTaskList.remove(video);
+                        // Reset progress
+                        if (currentTaskList.isEmpty()) {
+                            currentProgress = new AtomicInteger();
+                        }
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     }
