@@ -7,7 +7,7 @@ import java.util.concurrent.Executors;
  * @author ChengFeng
  * @since 2024/3/23
  **/
-public class MultiThreads {
+class MultiThreads {
     public static ExecutorService videoExecutor;
     public static ExecutorService tsExecutor;
 

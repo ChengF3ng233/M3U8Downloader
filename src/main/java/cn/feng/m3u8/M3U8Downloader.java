@@ -22,7 +22,7 @@ import static cn.feng.m3u8.Util.*;
 
 /**
  * A downloader for m3u8 videos.<br>
- * Call {@link MultiThreads#launch(int, int)} before this is initialized.<br>
+ * Call {@link M3U8Downloader#init(int, int)} before constructor method.<br>
  * To show debug messages, set LEVEL in log4j.properties(or log4j2.xml) to DEBUG
  * @author ChengFeng
  * @since 2024/3/23
@@ -42,9 +42,13 @@ public class M3U8Downloader {
     private IntConsumer onProgress;
     private Runnable onComplete;
 
+    public static void init(int videoThreadCount, int tsThreadCount) {
+        MultiThreads.launch(videoThreadCount, tsThreadCount);
+    }
+
     private void checkMultiThreads() {
         if (MultiThreads.videoExecutor == null || MultiThreads.tsExecutor == null) {
-            throw new IllegalStateException("MultiThreads must be initialized before this.");
+            throw new IllegalStateException("Method \"init(int, int)\" must be called in advance.");
         }
     }
 
@@ -66,7 +70,7 @@ public class M3U8Downloader {
     }
 
     /**
-     * Setup a proxy for the downloader.
+     * Set up a proxy for the downloader.
      */
     public void proxy(Proxy proxy) {
         client = builder.proxy(proxy).build();
